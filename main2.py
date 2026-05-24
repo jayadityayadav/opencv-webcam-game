@@ -1,4 +1,7 @@
-
+# ============================================================
+# NEXUS VOID
+# ULTRA ADVANCED HAND CONTROLLED CYBERPUNK SHOOTER
+# ============================================================
 
 import cv2
 import numpy as np
@@ -8,7 +11,7 @@ import math
 import time
 
 # ============================================================
-# OPENCV OPTIMIZATION
+# OPTIMIZATION
 # ============================================================
 
 cv2.setUseOptimized(True)
@@ -26,8 +29,8 @@ CAM_H = 240
 GAME_W = 1280
 GAME_H = 720
 
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
+cap.set(3, CAM_W)
+cap.set(4, CAM_H)
 
 # ============================================================
 # MEDIAPIPE
@@ -40,8 +43,6 @@ hands = mp_hands.Hands(
     min_detection_confidence=0.65,
     min_tracking_confidence=0.65
 )
-
-mp_draw = mp.solutions.drawing_utils
 
 # ============================================================
 # COLORS
@@ -66,6 +67,8 @@ player_y = GAME_H - 120
 smooth_x = player_x
 smooth_y = player_y
 
+trail_points = []
+
 # ============================================================
 # GAME VARIABLES
 # ============================================================
@@ -75,22 +78,28 @@ health = 100
 combo = 0
 level = 1
 
-shield = 0
+boss_mode = False
+
 laser_mode = 0
+shield = 0
 slow_motion = 0
 
-boss_mode = False
+screen_flash = 0
+screen_shake = 0
+
+frame_count = 0
 
 last_shot = 0
 shoot_delay = 0.12
 
-frame_count = 0
+charge_start = None
+charge_power = 0
+
+ultimate_ready = False
+ultimate_energy = 0
 
 prev_time = time.time()
 last_time = time.time()
-
-screen_flash = 0
-screen_shake = 0
 
 # ============================================================
 # OBJECTS
@@ -99,13 +108,14 @@ screen_shake = 0
 bullets = []
 enemies = []
 particles = []
+shockwaves = []
 stars = []
 
 # ============================================================
-# STARFIELD
+# STARS
 # ============================================================
 
-for i in range(120):
+for i in range(150):
 
     stars.append([
         random.randint(0, GAME_W),
@@ -119,12 +129,16 @@ for i in range(120):
 
 class Bullet:
 
-    def __init__(self, x, y):
+    def __init__(self, x, y, power=1):
 
         self.x = x
         self.y = y
 
-        self.speed = 1500
+        self.power = power
+
+        self.speed = 1800
+
+        self.radius = 6 + power * 2
 
     def update(self, dt):
 
@@ -132,20 +146,25 @@ class Bullet:
 
     def draw(self, frame, glow):
 
-        cv2.line(
-            frame,
-            (int(self.x), int(self.y)),
-            (int(self.x), int(self.y - 20)),
-            WHITE,
-            3
-        )
+        color = CYAN
 
-        cv2.line(
+        if self.power >= 3:
+            color = ORANGE
+
+        cv2.circle(
             glow,
             (int(self.x), int(self.y)),
-            (int(self.x), int(self.y - 20)),
-            CYAN,
-            8
+            self.radius + 12,
+            color,
+            -1
+        )
+
+        cv2.circle(
+            frame,
+            (int(self.x), int(self.y)),
+            self.radius,
+            WHITE,
+            -1
         )
 
 # ============================================================
@@ -161,29 +180,40 @@ class Enemy:
         self.boss = boss
 
         self.x = random.randint(80, GAME_W - 80)
-
-        self.y = -50
+        self.y = -100
 
         self.angle = 0
 
         if boss:
 
             self.radius = 120
-            self.hp = 100
-            self.speed = 120
+            self.hp = 150
+            self.speed = 140
 
         else:
 
-            self.radius = random.randint(20,45)
-            self.hp = 1
-
             if enemy_type == "fast":
-                self.speed = 420
+
+                self.radius = 20
+                self.hp = 1
+                self.speed = 500
+
+            elif enemy_type == "tank":
+
+                self.radius = 55
+                self.hp = 8
+                self.speed = 120
 
             elif enemy_type == "zigzag":
-                self.speed = 260
+
+                self.radius = 35
+                self.hp = 2
+                self.speed = 250
 
             else:
+
+                self.radius = 30
+                self.hp = 1
                 self.speed = 220
 
         self.color = (
@@ -202,7 +232,7 @@ class Enemy:
 
         if slow_motion > 0:
 
-            self.y += self.speed * dt * 0.3
+            self.y += self.speed * dt * 0.35
 
         else:
 
@@ -213,7 +243,7 @@ class Enemy:
         cv2.circle(
             glow,
             (int(self.x), int(self.y)),
-            self.radius + 20,
+            self.radius + 18,
             PURPLE,
             -1
         )
@@ -229,7 +259,7 @@ class Enemy:
         cv2.circle(
             frame,
             (int(self.x), int(self.y)),
-            self.radius + 5,
+            self.radius + 4,
             WHITE,
             2
         )
@@ -238,18 +268,18 @@ class Enemy:
 
             cv2.rectangle(
                 frame,
-                (int(self.x-80), int(self.y-160)),
-                (int(self.x+80), int(self.y-135)),
+                (int(self.x-100), int(self.y-170)),
+                (int(self.x+100), int(self.y-140)),
                 WHITE,
                 2
             )
 
-            hp_width = int((self.hp / 100) * 160)
+            hp_width = int((self.hp / 150) * 200)
 
             cv2.rectangle(
                 frame,
-                (int(self.x-80), int(self.y-160)),
-                (int(self.x-80 + hp_width), int(self.y-135)),
+                (int(self.x-100), int(self.y-170)),
+                (int(self.x-100 + hp_width), int(self.y-140)),
                 RED,
                 -1
             )
@@ -260,26 +290,65 @@ class Enemy:
 
 class Particle:
 
-    def __init__(self, x, y):
+    def __init__(self, x, y, color):
 
         self.x = x
         self.y = y
 
-        self.vx = random.uniform(-300,300)
-        self.vy = random.uniform(-300,300)
+        self.vx = random.uniform(-500,500)
+        self.vy = random.uniform(-500,500)
 
-        self.life = random.randint(15,30)
+        self.life = random.randint(15,40)
 
-        self.size = random.randint(2,4)
+        self.size = random.randint(2,5)
+
+        self.color = color
 
     def update(self, dt):
 
         self.x += self.vx * dt
         self.y += self.vy * dt
 
-        self.vx *= 0.96
-        self.vy *= 0.96
+        self.vx *= 0.95
+        self.vy *= 0.95
 
+        self.life -= 1
+
+    def draw(self, frame):
+
+        alpha = max(0, self.life / 40)
+
+        color = (
+            int(self.color[0] * alpha),
+            int(self.color[1] * alpha),
+            int(self.color[2] * alpha)
+        )
+
+        cv2.circle(
+            frame,
+            (int(self.x), int(self.y)),
+            self.size,
+            color,
+            -1
+        )
+
+# ============================================================
+# SHOCKWAVE
+# ============================================================
+
+class Shockwave:
+
+    def __init__(self, x, y):
+
+        self.x = x
+        self.y = y
+
+        self.radius = 10
+        self.life = 20
+
+    def update(self):
+
+        self.radius += 15
         self.life -= 1
 
     def draw(self, frame):
@@ -287,20 +356,44 @@ class Particle:
         cv2.circle(
             frame,
             (int(self.x), int(self.y)),
-            self.size,
+            int(self.radius),
             CYAN,
-            -1
+            3
         )
 
 # ============================================================
-# STARS
+# BACKGROUND
 # ============================================================
 
-def draw_stars(frame, dt):
+def draw_background(frame, dt):
+
+    offset = int(time.time() * 100) % 40
+
+    for x in range(0, GAME_W, 40):
+
+        cv2.line(
+            frame,
+            (x,0),
+            (x,GAME_H),
+            (15,8,30),
+            1
+        )
+
+    for y in range(-40, GAME_H, 40):
+
+        y += offset
+
+        cv2.line(
+            frame,
+            (0,y),
+            (GAME_W,y),
+            (15,8,30),
+            1
+        )
 
     for star in stars:
 
-        star[1] += star[2] * 120 * dt
+        star[1] += star[2] * 140 * dt
 
         if star[1] > GAME_H:
 
@@ -313,36 +406,6 @@ def draw_stars(frame, dt):
             star[2],
             WHITE,
             -1
-        )
-
-# ============================================================
-# CYBER GRID
-# ============================================================
-
-def draw_grid(frame):
-
-    offset = int(time.time() * 80) % 40
-
-    for x in range(0, GAME_W, 40):
-
-        cv2.line(
-            frame,
-            (x,0),
-            (x,GAME_H),
-            (20,10,40),
-            1
-        )
-
-    for y in range(-40, GAME_H, 40):
-
-        y += offset
-
-        cv2.line(
-            frame,
-            (0,y),
-            (GAME_W,y),
-            (20,10,40),
-            1
         )
 
 # ============================================================
@@ -364,6 +427,8 @@ while True:
 
     cam = cv2.flip(cam,1)
 
+    frame_count += 1
+
     # ========================================================
     # SURFACES
     # ========================================================
@@ -374,13 +439,11 @@ while True:
 
     ui = np.zeros_like(frame)
 
-    frame_count += 1
-
     # ========================================================
     # FPS
     # ========================================================
 
-    fps = int(1 / max(dt, 0.0001))
+    fps = int(1 / max(dt, 0.001))
 
     # ========================================================
     # LEVEL
@@ -392,9 +455,7 @@ while True:
     # BACKGROUND
     # ========================================================
 
-    draw_grid(frame)
-
-    draw_stars(frame, dt)
+    draw_background(frame, dt)
 
     # ========================================================
     # HAND TRACKING
@@ -412,12 +473,6 @@ while True:
 
             for hand_landmarks in results.multi_hand_landmarks:
 
-                mp_draw.draw_landmarks(
-                    cam,
-                    hand_landmarks,
-                    mp_hands.HAND_CONNECTIONS
-                )
-
                 index_tip = hand_landmarks.landmark[8]
                 thumb_tip = hand_landmarks.landmark[4]
 
@@ -427,17 +482,35 @@ while True:
                 tx = int(thumb_tip.x * GAME_W)
                 ty = int(thumb_tip.y * GAME_H)
 
-                smooth_x = int(smooth_x * 0.75 + ix * 0.25)
-                smooth_y = int(smooth_y * 0.75 + iy * 0.25)
+                smooth_x = int(smooth_x * 0.8 + ix * 0.2)
+                smooth_y = int(smooth_y * 0.8 + iy * 0.2)
 
                 player_x = smooth_x
                 player_y = smooth_y
 
                 distance = math.hypot(ix - tx, iy - ty)
 
-                if distance < 40:
+                # ====================================================
+                # CHARGE SYSTEM
+                # ====================================================
+
+                if distance < 45:
+
+                    if charge_start is None:
+
+                        charge_start = time.time()
+
+                    charge_power = min(
+                        5,
+                        int((time.time() - charge_start) * 5)
+                    )
 
                     shoot = True
+
+                else:
+
+                    charge_start = None
+                    charge_power = 1
 
     # ========================================================
     # SHOOT
@@ -446,17 +519,21 @@ while True:
     if shoot and current_time - last_shot > shoot_delay:
 
         bullets.append(
-            Bullet(player_x, player_y)
+            Bullet(
+                player_x,
+                player_y,
+                max(1, charge_power)
+            )
         )
 
         if laser_mode > 0:
 
             bullets.append(
-                Bullet(player_x - 25, player_y)
+                Bullet(player_x - 25, player_y, charge_power)
             )
 
             bullets.append(
-                Bullet(player_x + 25, player_y)
+                Bullet(player_x + 25, player_y, charge_power)
             )
 
         last_shot = current_time
@@ -465,11 +542,12 @@ while True:
     # ENEMY SPAWN
     # ========================================================
 
-    if random.randint(1, max(4, 20-level)) == 1:
+    if random.randint(1, max(4, 22-level)) == 1:
 
         enemy_type = random.choice([
             "normal",
             "fast",
+            "tank",
             "zigzag"
         ])
 
@@ -481,7 +559,7 @@ while True:
     # BOSS
     # ========================================================
 
-    if score > 0 and score % 500 == 0 and not boss_mode:
+    if score > 0 and score % 700 == 0 and not boss_mode:
 
         enemies.append(
             Enemy(boss=True)
@@ -523,7 +601,11 @@ while True:
             health -= 10
 
             screen_flash = 0.5
-            screen_shake = 8
+            screen_shake = 10
+
+            shockwaves.append(
+                Shockwave(player_x, player_y)
+            )
 
             enemies.remove(enemy)
 
@@ -538,15 +620,21 @@ while True:
 
             if dist < enemy.radius:
 
-                enemy.hp -= 1
+                enemy.hp -= bullet.power
 
-                screen_flash = 0.15
-                screen_shake = 4
+                screen_flash = 0.12
+                screen_shake = 5
 
-                for i in range(12):
+                ultimate_energy += 1
+
+                shockwaves.append(
+                    Shockwave(enemy.x, enemy.y)
+                )
+
+                for i in range(18):
 
                     particles.append(
-                        Particle(enemy.x, enemy.y)
+                        Particle(enemy.x, enemy.y, CYAN)
                     )
 
                 if bullet in bullets:
@@ -556,7 +644,7 @@ while True:
 
                     if enemy.boss:
 
-                        score += 500
+                        score += 700
                         boss_mode = False
 
                     else:
@@ -565,9 +653,29 @@ while True:
 
                     combo += 1
 
+                    for i in range(40):
+
+                        particles.append(
+                            Particle(enemy.x, enemy.y, ORANGE)
+                        )
+
                     enemies.remove(enemy)
 
                 break
+
+    # ========================================================
+    # SHOCKWAVES
+    # ========================================================
+
+    for shockwave in shockwaves[:]:
+
+        shockwave.update()
+
+        shockwave.draw(frame)
+
+        if shockwave.life <= 0:
+
+            shockwaves.remove(shockwave)
 
     # ========================================================
     # PARTICLES
@@ -584,13 +692,37 @@ while True:
             particles.remove(particle)
 
     # ========================================================
+    # PLAYER TRAIL
+    # ========================================================
+
+    trail_points.append((player_x, player_y))
+
+    if len(trail_points) > 15:
+
+        trail_points.pop(0)
+
+    for i in range(1, len(trail_points)):
+
+        alpha = i / len(trail_points)
+
+        thickness = int(10 * alpha)
+
+        cv2.line(
+            glow,
+            trail_points[i-1],
+            trail_points[i],
+            CYAN,
+            thickness
+        )
+
+    # ========================================================
     # PLAYER
     # ========================================================
 
     cv2.circle(
         glow,
         (player_x, player_y),
-        60,
+        70,
         CYAN,
         -1
     )
@@ -598,7 +730,7 @@ while True:
     cv2.circle(
         frame,
         (player_x, player_y),
-        28,
+        30,
         CYAN,
         -1
     )
@@ -606,7 +738,7 @@ while True:
     cv2.circle(
         frame,
         (player_x, player_y),
-        45,
+        50,
         WHITE,
         2
     )
@@ -615,7 +747,7 @@ while True:
     # GLOW PASS
     # ========================================================
 
-    glow = cv2.GaussianBlur(glow, (0,0), 10)
+    glow = cv2.GaussianBlur(glow, (0,0), 12)
 
     frame = cv2.addWeighted(
         frame,
@@ -655,7 +787,7 @@ while True:
             0
         )
 
-        screen_flash *= 0.85
+        screen_flash *= 0.88
 
     # ========================================================
     # HEALTH BAR
@@ -678,13 +810,35 @@ while True:
     )
 
     # ========================================================
+    # ULTIMATE BAR
+    # ========================================================
+
+    ultimate_energy = min(100, ultimate_energy)
+
+    cv2.rectangle(
+        ui,
+        (20,60),
+        (320,85),
+        WHITE,
+        2
+    )
+
+    cv2.rectangle(
+        ui,
+        (20,60),
+        (20 + int(ultimate_energy * 3),85),
+        CYAN,
+        -1
+    )
+
+    # ========================================================
     # HUD
     # ========================================================
 
     cv2.putText(
         ui,
         f"SCORE : {score}",
-        (20,90),
+        (20,130),
         cv2.FONT_HERSHEY_SIMPLEX,
         1,
         WHITE,
@@ -694,7 +848,7 @@ while True:
     cv2.putText(
         ui,
         f"LEVEL : {level}",
-        (20,140),
+        (20,180),
         cv2.FONT_HERSHEY_SIMPLEX,
         1,
         CYAN,
@@ -704,7 +858,7 @@ while True:
     cv2.putText(
         ui,
         f"FPS : {fps}",
-        (20,190),
+        (20,230),
         cv2.FONT_HERSHEY_SIMPLEX,
         1,
         GREEN,
@@ -714,26 +868,20 @@ while True:
     cv2.putText(
         ui,
         f"COMBO : {combo}",
-        (20,240),
+        (20,280),
         cv2.FONT_HERSHEY_SIMPLEX,
         1,
         YELLOW,
         2
     )
 
-    # ========================================================
-    # CAMERA WINDOW
-    # ========================================================
-
-    cam = cv2.resize(cam, (320,240))
-
-    frame[20:260, GAME_W-340:GAME_W-20] = cam
-
-    cv2.rectangle(
-        frame,
-        (GAME_W-340,20),
-        (GAME_W-20,260),
-        CYAN,
+    cv2.putText(
+        ui,
+        f"CHARGE : {charge_power}",
+        (20,330),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        ORANGE,
         2
     )
 
@@ -759,10 +907,7 @@ while True:
             6
         )
 
-        cv2.imshow(
-            "ULTRA ADVANCED AI CYBER SHOOTER",
-            frame
-        )
+        cv2.imshow("NEXUS VOID", frame)
 
         cv2.waitKey(4000)
 
@@ -772,10 +917,7 @@ while True:
     # SHOW
     # ========================================================
 
-    cv2.imshow(
-        "ULTRA ADVANCED AI CYBER SHOOTER",
-        frame
-    )
+    cv2.imshow("NEXUS VOID", frame)
 
     if cv2.waitKey(1) & 0xFF == 27:
         break
