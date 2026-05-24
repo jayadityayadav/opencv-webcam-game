@@ -1,7 +1,4 @@
-# ============================================================
-# ULTRA ADVANCED AI CYBER SHOOTER ENGINE
-# PROFESSIONAL OPTIMIZED VERSION
-# ============================================================
+
 
 import cv2
 import numpy as np
