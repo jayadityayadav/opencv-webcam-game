@@ -705,7 +705,7 @@ while True:
 
         alpha = i / len(trail_points)
 
-        thickness = int(10 * alpha)
+        thickness = max(1, int(10 * alpha))
 
         cv2.line(
             glow,
