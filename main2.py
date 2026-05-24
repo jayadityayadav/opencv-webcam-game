@@ -1,5 +1,6 @@
 # ============================================================
-# ULTRA ADVANCED AI CYBER SHOOTER
+# ULTRA ADVANCED AI CYBER SHOOTER ENGINE
+# PROFESSIONAL OPTIMIZED VERSION
 # ============================================================
 
 import cv2
@@ -10,16 +11,26 @@ import math
 import time
 
 # ============================================================
+# OPENCV OPTIMIZATION
+# ============================================================
+
+cv2.setUseOptimized(True)
+cv2.ocl.setUseOpenCL(True)
+
+# ============================================================
 # CAMERA
 # ============================================================
 
 cap = cv2.VideoCapture(0)
 
-WIDTH = 1280
-HEIGHT = 720
+CAM_W = 320
+CAM_H = 240
 
-cap.set(3, WIDTH)
-cap.set(4, HEIGHT)
+GAME_W = 1280
+GAME_H = 720
+
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_W)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
 
 # ============================================================
 # MEDIAPIPE
@@ -29,8 +40,8 @@ mp_hands = mp.solutions.hands
 
 hands = mp_hands.Hands(
     max_num_hands=1,
-    min_detection_confidence=0.7,
-    min_tracking_confidence=0.7
+    min_detection_confidence=0.65,
+    min_tracking_confidence=0.65
 )
 
 mp_draw = mp.solutions.drawing_utils
@@ -52,8 +63,8 @@ ORANGE = (0,165,255)
 # PLAYER
 # ============================================================
 
-player_x = WIDTH // 2
-player_y = HEIGHT - 100
+player_x = GAME_W // 2
+player_y = GAME_H - 120
 
 smooth_x = player_x
 smooth_y = player_y
@@ -68,38 +79,40 @@ combo = 0
 level = 1
 
 shield = 0
-slow_motion = 0
 laser_mode = 0
-screen_shake = 0
+slow_motion = 0
 
 boss_mode = False
 
 last_shot = 0
-shoot_delay = 0.15
+shoot_delay = 0.12
+
+frame_count = 0
 
 prev_time = time.time()
+last_time = time.time()
+
+screen_flash = 0
+screen_shake = 0
 
 # ============================================================
 # OBJECTS
 # ============================================================
 
 bullets = []
-enemy_bullets = []
 enemies = []
 particles = []
-powerups = []
-damage_numbers = []
 stars = []
 
 # ============================================================
 # STARFIELD
 # ============================================================
 
-for i in range(200):
+for i in range(120):
 
     stars.append([
-        random.randint(0, WIDTH),
-        random.randint(0, HEIGHT),
+        random.randint(0, GAME_W),
+        random.randint(0, GAME_H),
         random.randint(1,3)
     ])
 
@@ -113,66 +126,29 @@ class Bullet:
 
         self.x = x
         self.y = y
-        self.speed = 25
 
-    def update(self):
+        self.speed = 1500
 
-        self.y -= self.speed
+    def update(self, dt):
 
-    def draw(self, frame):
+        self.y -= self.speed * dt
 
-        overlay = frame.copy()
-
-        cv2.line(
-            overlay,
-            (int(self.x), int(self.y)),
-            (int(self.x), int(self.y - 35)),
-            CYAN,
-            10
-        )
-
-        overlay = cv2.GaussianBlur(overlay, (0,0), 10)
-
-        frame[:] = cv2.addWeighted(
-            overlay,
-            0.5,
-            frame,
-            0.5,
-            0
-        )
+    def draw(self, frame, glow):
 
         cv2.line(
             frame,
             (int(self.x), int(self.y)),
-            (int(self.x), int(self.y - 35)),
+            (int(self.x), int(self.y - 20)),
             WHITE,
-            4
+            3
         )
 
-# ============================================================
-# ENEMY BULLET
-# ============================================================
-
-class EnemyBullet:
-
-    def __init__(self, x, y):
-
-        self.x = x
-        self.y = y
-        self.speed = 10
-
-    def update(self):
-
-        self.y += self.speed
-
-    def draw(self, frame):
-
-        cv2.circle(
-            frame,
+        cv2.line(
+            glow,
             (int(self.x), int(self.y)),
-            10,
-            ORANGE,
-            -1
+            (int(self.x), int(self.y - 20)),
+            CYAN,
+            8
         )
 
 # ============================================================
@@ -181,24 +157,37 @@ class EnemyBullet:
 
 class Enemy:
 
-    def __init__(self, boss=False):
+    def __init__(self, enemy_type="normal", boss=False):
+
+        self.type = enemy_type
 
         self.boss = boss
 
-        self.x = random.randint(80, WIDTH - 80)
+        self.x = random.randint(80, GAME_W - 80)
+
         self.y = -50
+
+        self.angle = 0
 
         if boss:
 
             self.radius = 120
-            self.hp = 60
-            self.speed = 2
+            self.hp = 100
+            self.speed = 120
 
         else:
 
-            self.radius = random.randint(25,45)
+            self.radius = random.randint(20,45)
             self.hp = 1
-            self.speed = random.uniform(3,8) + level * 0.5
+
+            if enemy_type == "fast":
+                self.speed = 420
+
+            elif enemy_type == "zigzag":
+                self.speed = 260
+
+            else:
+                self.speed = 220
 
         self.color = (
             random.randint(100,255),
@@ -206,44 +195,30 @@ class Enemy:
             random.randint(100,255)
         )
 
-    def update(self):
+    def update(self, dt):
+
+        self.angle += 0.05
+
+        if self.type == "zigzag":
+
+            self.x += math.sin(self.angle * 5) * 8
 
         if slow_motion > 0:
 
-            self.y += self.speed * 0.3
+            self.y += self.speed * dt * 0.3
 
         else:
 
-            self.y += self.speed
+            self.y += self.speed * dt
 
-        if self.boss:
-
-            if random.randint(1,12) == 1:
-
-                enemy_bullets.append(
-                    EnemyBullet(self.x, self.y)
-                )
-
-    def draw(self, frame):
-
-        overlay = frame.copy()
+    def draw(self, frame, glow):
 
         cv2.circle(
-            overlay,
+            glow,
             (int(self.x), int(self.y)),
-            self.radius + 25,
+            self.radius + 20,
             PURPLE,
             -1
-        )
-
-        overlay = cv2.GaussianBlur(overlay, (0,0), 20)
-
-        frame[:] = cv2.addWeighted(
-            overlay,
-            0.25,
-            frame,
-            0.75,
-            0
         )
 
         cv2.circle(
@@ -257,7 +232,7 @@ class Enemy:
         cv2.circle(
             frame,
             (int(self.x), int(self.y)),
-            self.radius + 10,
+            self.radius + 5,
             WHITE,
             2
         )
@@ -266,18 +241,18 @@ class Enemy:
 
             cv2.rectangle(
                 frame,
-                (int(self.x-80), int(self.y-150)),
-                (int(self.x+80), int(self.y-130)),
+                (int(self.x-80), int(self.y-160)),
+                (int(self.x+80), int(self.y-135)),
                 WHITE,
                 2
             )
 
-            hp_width = int((self.hp / 60) * 160)
+            hp_width = int((self.hp / 100) * 160)
 
             cv2.rectangle(
                 frame,
-                (int(self.x-80), int(self.y-150)),
-                (int(self.x-80 + hp_width), int(self.y-130)),
+                (int(self.x-80), int(self.y-160)),
+                (int(self.x-80 + hp_width), int(self.y-135)),
                 RED,
                 -1
             )
@@ -288,22 +263,25 @@ class Enemy:
 
 class Particle:
 
-    def __init__(self, x, y, color):
+    def __init__(self, x, y):
 
         self.x = x
         self.y = y
 
-        self.vx = random.uniform(-10,10)
-        self.vy = random.uniform(-10,10)
+        self.vx = random.uniform(-300,300)
+        self.vy = random.uniform(-300,300)
 
-        self.life = random.randint(20,50)
+        self.life = random.randint(15,30)
 
-        self.color = color
+        self.size = random.randint(2,4)
 
-    def update(self):
+    def update(self, dt):
 
-        self.x += self.vx
-        self.y += self.vy
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+
+        self.vx *= 0.96
+        self.vy *= 0.96
 
         self.life -= 1
 
@@ -312,86 +290,32 @@ class Particle:
         cv2.circle(
             frame,
             (int(self.x), int(self.y)),
-            3,
-            self.color,
+            self.size,
+            CYAN,
             -1
         )
 
 # ============================================================
-# POWERUP
+# STARS
 # ============================================================
 
-class PowerUp:
+def draw_stars(frame, dt):
 
-    def __init__(self):
+    for star in stars:
 
-        self.x = random.randint(50, WIDTH - 50)
-        self.y = -50
+        star[1] += star[2] * 120 * dt
 
-        self.radius = 25
-        self.speed = 5
+        if star[1] > GAME_H:
 
-        self.type = random.choice([
-            "shield",
-            "heal",
-            "slow",
-            "laser"
-        ])
-
-    def update(self):
-
-        self.y += self.speed
-
-    def draw(self, frame):
-
-        color = GREEN
-
-        if self.type == "shield":
-            color = BLUE
-
-        elif self.type == "slow":
-            color = PURPLE
-
-        elif self.type == "laser":
-            color = CYAN
+            star[0] = random.randint(0, GAME_W)
+            star[1] = 0
 
         cv2.circle(
             frame,
-            (int(self.x), int(self.y)),
-            self.radius,
-            color,
+            (int(star[0]), int(star[1])),
+            star[2],
+            WHITE,
             -1
-        )
-
-# ============================================================
-# DAMAGE TEXT
-# ============================================================
-
-class DamageText:
-
-    def __init__(self, x, y, text):
-
-        self.x = x
-        self.y = y
-
-        self.text = text
-        self.life = 30
-
-    def update(self):
-
-        self.y -= 2
-        self.life -= 1
-
-    def draw(self, frame):
-
-        cv2.putText(
-            frame,
-            self.text,
-            (int(self.x), int(self.y)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            YELLOW,
-            3
         )
 
 # ============================================================
@@ -400,51 +324,28 @@ class DamageText:
 
 def draw_grid(frame):
 
-    offset = int(time.time() * 60) % 40
+    offset = int(time.time() * 80) % 40
 
-    for x in range(0, WIDTH, 40):
+    for x in range(0, GAME_W, 40):
 
         cv2.line(
             frame,
             (x,0),
-            (x,HEIGHT),
+            (x,GAME_H),
             (20,10,40),
             1
         )
 
-    for y in range(-40, HEIGHT, 40):
+    for y in range(-40, GAME_H, 40):
 
         y += offset
 
         cv2.line(
             frame,
             (0,y),
-            (WIDTH,y),
+            (GAME_W,y),
             (20,10,40),
             1
-        )
-
-# ============================================================
-# STARFIELD
-# ============================================================
-
-def draw_stars(frame):
-
-    for star in stars:
-
-        star[1] += star[2]
-
-        if star[1] > HEIGHT:
-
-            star[0] = random.randint(0, WIDTH)
-            star[1] = 0
-
-        cv2.circle(
-            frame,
-            (star[0], star[1]),
-            star[2],
-            WHITE,
-            -1
         )
 
 # ============================================================
@@ -453,84 +354,97 @@ def draw_stars(frame):
 
 while True:
 
-    success, frame = cap.read()
+    current_time = time.time()
+
+    dt = current_time - last_time
+
+    last_time = current_time
+
+    success, cam = cap.read()
 
     if not success:
         break
 
-    frame = cv2.flip(frame,1)
+    cam = cv2.flip(cam,1)
 
-    frame = cv2.resize(frame,(WIDTH,HEIGHT))
+    # ========================================================
+    # SURFACES
+    # ========================================================
 
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame = np.zeros((GAME_H, GAME_W, 3), dtype=np.uint8)
+
+    glow = np.zeros_like(frame)
+
+    ui = np.zeros_like(frame)
+
+    frame_count += 1
 
     # ========================================================
     # FPS
     # ========================================================
 
-    fps = int(1 / (time.time() - prev_time))
-    prev_time = time.time()
+    fps = int(1 / max(dt, 0.0001))
 
     # ========================================================
-    # LEVEL SYSTEM
+    # LEVEL
     # ========================================================
 
     level = score // 100 + 1
 
     # ========================================================
-    # EFFECTS
+    # BACKGROUND
     # ========================================================
 
     draw_grid(frame)
-    draw_stars(frame)
+
+    draw_stars(frame, dt)
 
     # ========================================================
     # HAND TRACKING
     # ========================================================
 
-    results = hands.process(rgb)
-
     shoot = False
 
-    if results.multi_hand_landmarks:
+    if frame_count % 2 == 0:
 
-        for hand_landmarks in results.multi_hand_landmarks:
+        rgb = cv2.cvtColor(cam, cv2.COLOR_BGR2RGB)
 
-            mp_draw.draw_landmarks(
-                frame,
-                hand_landmarks,
-                mp_hands.HAND_CONNECTIONS
-            )
+        results = hands.process(rgb)
 
-            index_tip = hand_landmarks.landmark[8]
-            thumb_tip = hand_landmarks.landmark[4]
+        if results.multi_hand_landmarks:
 
-            ix = int(index_tip.x * WIDTH)
-            iy = int(index_tip.y * HEIGHT)
+            for hand_landmarks in results.multi_hand_landmarks:
 
-            tx = int(thumb_tip.x * WIDTH)
-            ty = int(thumb_tip.y * HEIGHT)
+                mp_draw.draw_landmarks(
+                    cam,
+                    hand_landmarks,
+                    mp_hands.HAND_CONNECTIONS
+                )
 
-            smooth_x = int(smooth_x * 0.7 + ix * 0.3)
-            smooth_y = int(smooth_y * 0.7 + iy * 0.3)
+                index_tip = hand_landmarks.landmark[8]
+                thumb_tip = hand_landmarks.landmark[4]
 
-            player_x = smooth_x
-            player_y = smooth_y
+                ix = int(index_tip.x * GAME_W)
+                iy = int(index_tip.y * GAME_H)
 
-            distance = math.sqrt(
-                (ix - tx)**2 +
-                (iy - ty)**2
-            )
+                tx = int(thumb_tip.x * GAME_W)
+                ty = int(thumb_tip.y * GAME_H)
 
-            if distance < 40:
+                smooth_x = int(smooth_x * 0.75 + ix * 0.25)
+                smooth_y = int(smooth_y * 0.75 + iy * 0.25)
 
-                shoot = True
+                player_x = smooth_x
+                player_y = smooth_y
+
+                distance = math.hypot(ix - tx, iy - ty)
+
+                if distance < 40:
+
+                    shoot = True
 
     # ========================================================
     # SHOOT
     # ========================================================
-
-    current_time = time.time()
 
     if shoot and current_time - last_shot > shoot_delay:
 
@@ -556,8 +470,14 @@ while True:
 
     if random.randint(1, max(4, 20-level)) == 1:
 
+        enemy_type = random.choice([
+            "normal",
+            "fast",
+            "zigzag"
+        ])
+
         enemies.append(
-            Enemy()
+            Enemy(enemy_type)
         )
 
     # ========================================================
@@ -573,49 +493,18 @@ while True:
         boss_mode = True
 
     # ========================================================
-    # POWERUPS
-    # ========================================================
-
-    if random.randint(1,250) == 1:
-
-        powerups.append(
-            PowerUp()
-        )
-
-    # ========================================================
     # BULLETS
     # ========================================================
 
     for bullet in bullets[:]:
 
-        bullet.update()
-        bullet.draw(frame)
+        bullet.update(dt)
+
+        bullet.draw(frame, glow)
 
         if bullet.y < 0:
 
             bullets.remove(bullet)
-
-    # ========================================================
-    # ENEMY BULLETS
-    # ========================================================
-
-    for eb in enemy_bullets[:]:
-
-        eb.update()
-        eb.draw(frame)
-
-        dist = math.sqrt(
-            (eb.x-player_x)**2 +
-            (eb.y-player_y)**2
-        )
-
-        if dist < 30:
-
-            if shield <= 0:
-
-                health -= 5
-
-            enemy_bullets.remove(eb)
 
     # ========================================================
     # ENEMIES
@@ -623,21 +512,21 @@ while True:
 
     for enemy in enemies[:]:
 
-        enemy.update()
-        enemy.draw(frame)
+        enemy.update(dt)
 
-        dist_player = math.sqrt(
-            (enemy.x-player_x)**2 +
-            (enemy.y-player_y)**2
+        enemy.draw(frame, glow)
+
+        dist_player = math.hypot(
+            enemy.x-player_x,
+            enemy.y-player_y
         )
 
-        if dist_player < enemy.radius + 25:
+        if dist_player < enemy.radius + 30:
 
-            if shield <= 0:
+            health -= 10
 
-                health -= 15
-
-            screen_shake = 15
+            screen_flash = 0.5
+            screen_shake = 8
 
             enemies.remove(enemy)
 
@@ -645,21 +534,22 @@ while True:
 
         for bullet in bullets[:]:
 
-            dist = math.sqrt(
-                (enemy.x-bullet.x)**2 +
-                (enemy.y-bullet.y)**2
+            dist = math.hypot(
+                enemy.x-bullet.x,
+                enemy.y-bullet.y
             )
 
             if dist < enemy.radius:
 
                 enemy.hp -= 1
 
-                screen_shake = 5
+                screen_flash = 0.15
+                screen_shake = 4
 
-                for i in range(30):
+                for i in range(12):
 
                     particles.append(
-                        Particle(enemy.x, enemy.y, CYAN)
+                        Particle(enemy.x, enemy.y)
                     )
 
                 if bullet in bullets:
@@ -669,53 +559,18 @@ while True:
 
                     if enemy.boss:
 
-                        score += 300
+                        score += 500
                         boss_mode = False
 
                     else:
 
-                        score += 10 * max(1, combo // 5)
+                        score += 10
 
                     combo += 1
 
-                    damage_numbers.append(
-                        DamageText(enemy.x, enemy.y, "+10")
-                    )
-
-                    if enemy in enemies:
-                        enemies.remove(enemy)
+                    enemies.remove(enemy)
 
                 break
-
-    # ========================================================
-    # POWERUPS
-    # ========================================================
-
-    for p in powerups[:]:
-
-        p.update()
-        p.draw(frame)
-
-        dist = math.sqrt(
-            (p.x-player_x)**2 +
-            (p.y-player_y)**2
-        )
-
-        if dist < p.radius + 25:
-
-            if p.type == "heal":
-                health = min(100, health + 30)
-
-            elif p.type == "shield":
-                shield = 300
-
-            elif p.type == "slow":
-                slow_motion = 300
-
-            elif p.type == "laser":
-                laser_mode = 300
-
-            powerups.remove(p)
 
     # ========================================================
     # PARTICLES
@@ -723,7 +578,8 @@ while True:
 
     for particle in particles[:]:
 
-        particle.update()
+        particle.update(dt)
+
         particle.draw(frame)
 
         if particle.life <= 0:
@@ -731,78 +587,45 @@ while True:
             particles.remove(particle)
 
     # ========================================================
-    # DAMAGE TEXT
+    # PLAYER
     # ========================================================
-
-    for dmg in damage_numbers[:]:
-
-        dmg.update()
-        dmg.draw(frame)
-
-        if dmg.life <= 0:
-
-            damage_numbers.remove(dmg)
-
-    # ========================================================
-    # TIMERS
-    # ========================================================
-
-    if shield > 0:
-
-        shield -= 1
-
-        cv2.circle(
-            frame,
-            (player_x, player_y),
-            60,
-            BLUE,
-            3
-        )
-
-    if slow_motion > 0:
-        slow_motion -= 1
-
-    if laser_mode > 0:
-        laser_mode -= 1
-
-    # ========================================================
-    # PLAYER GLOW
-    # ========================================================
-
-    overlay = frame.copy()
 
     cv2.circle(
-        overlay,
+        glow,
         (player_x, player_y),
-        70,
+        60,
         CYAN,
         -1
     )
 
-    overlay = cv2.GaussianBlur(overlay, (0,0), 25)
+    cv2.circle(
+        frame,
+        (player_x, player_y),
+        28,
+        CYAN,
+        -1
+    )
+
+    cv2.circle(
+        frame,
+        (player_x, player_y),
+        45,
+        WHITE,
+        2
+    )
+
+    # ========================================================
+    # GLOW PASS
+    # ========================================================
+
+    glow = cv2.GaussianBlur(glow, (0,0), 10)
 
     frame = cv2.addWeighted(
-        overlay,
-        0.25,
         frame,
-        0.75,
+        1,
+        glow,
+        0.45,
         0
-    )
-
-    cv2.circle(
-        frame,
-        (player_x, player_y),
-        30,
-        CYAN,
-        -1
-    )
-
-    cv2.circle(
-        frame,
-        (player_x, player_y),
-        50,
-        WHITE,
-        3
     )
 
     # ========================================================
@@ -814,20 +637,43 @@ while True:
         dx = random.randint(-screen_shake, screen_shake)
         dy = random.randint(-screen_shake, screen_shake)
 
-        M = np.float32([[1,0,dx],[0,1,dy]])
-
-        frame = cv2.warpAffine(frame, M, (WIDTH, HEIGHT))
+        frame = np.roll(frame, dx, axis=1)
+        frame = np.roll(frame, dy, axis=0)
 
         screen_shake -= 1
+
+    # ========================================================
+    # SCREEN FLASH
+    # ========================================================
+
+    if screen_flash > 0:
+
+        white = np.full(frame.shape, 255, dtype=np.uint8)
+
+        frame = cv2.addWeighted(
+            frame,
+            1-screen_flash,
+            white,
+            screen_flash,
+            0
+        )
+
+        screen_flash *= 0.85
 
     # ========================================================
     # HEALTH BAR
     # ========================================================
 
-    cv2.rectangle(frame, (20,20), (320,45), WHITE, 2)
+    cv2.rectangle(
+        ui,
+        (20,20),
+        (320,45),
+        WHITE,
+        2
+    )
 
     cv2.rectangle(
-        frame,
+        ui,
         (20,20),
         (20 + int(health * 3),45),
         GREEN,
@@ -839,9 +685,9 @@ while True:
     # ========================================================
 
     cv2.putText(
-        frame,
+        ui,
         f"SCORE : {score}",
-        (20,80),
+        (20,90),
         cv2.FONT_HERSHEY_SIMPLEX,
         1,
         WHITE,
@@ -849,19 +695,9 @@ while True:
     )
 
     cv2.putText(
-        frame,
-        f"COMBO : {combo}",
-        (20,120),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1,
-        YELLOW,
-        2
-    )
-
-    cv2.putText(
-        frame,
+        ui,
         f"LEVEL : {level}",
-        (20,160),
+        (20,140),
         cv2.FONT_HERSHEY_SIMPLEX,
         1,
         CYAN,
@@ -869,42 +705,46 @@ while True:
     )
 
     cv2.putText(
-        frame,
+        ui,
         f"FPS : {fps}",
-        (20,200),
+        (20,190),
         cv2.FONT_HERSHEY_SIMPLEX,
         1,
         GREEN,
         2
     )
 
+    cv2.putText(
+        ui,
+        f"COMBO : {combo}",
+        (20,240),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        YELLOW,
+        2
+    )
+
     # ========================================================
-    # POWER STATUS
+    # CAMERA WINDOW
     # ========================================================
 
-    if laser_mode > 0:
+    cam = cv2.resize(cam, (320,240))
 
-        cv2.putText(
-            frame,
-            "LASER MODE",
-            (900,50),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            CYAN,
-            3
-        )
+    frame[20:260, GAME_W-340:GAME_W-20] = cam
 
-    if slow_motion > 0:
+    cv2.rectangle(
+        frame,
+        (GAME_W-340,20),
+        (GAME_W-20,260),
+        CYAN,
+        2
+    )
 
-        cv2.putText(
-            frame,
-            "SLOW MOTION",
-            (850,100),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            PURPLE,
-            3
-        )
+    # ========================================================
+    # FINAL COMPOSITE
+    # ========================================================
+
+    frame = cv2.addWeighted(frame, 1, ui, 1, 0)
 
     # ========================================================
     # GAME OVER
@@ -922,17 +762,10 @@ while True:
             6
         )
 
-        cv2.putText(
-            frame,
-            f"FINAL SCORE : {score}",
-            (420,430),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.5,
-            WHITE,
-            3
+        cv2.imshow(
+            "ULTRA ADVANCED AI CYBER SHOOTER",
+            frame
         )
-
-        cv2.imshow("ULTRA AI CYBER SHOOTER", frame)
 
         cv2.waitKey(4000)
 
@@ -942,7 +775,10 @@ while True:
     # SHOW
     # ========================================================
 
-    cv2.imshow("ULTRA AI CYBER SHOOTER", frame)
+    cv2.imshow(
+        "ULTRA ADVANCED AI CYBER SHOOTER",
+        frame
+    )
 
     if cv2.waitKey(1) & 0xFF == 27:
         break
@@ -954,4 +790,5 @@ while True:
 print("FINAL SCORE:", score)
 
 cap.release()
+
 cv2.destroyAllWindows()
